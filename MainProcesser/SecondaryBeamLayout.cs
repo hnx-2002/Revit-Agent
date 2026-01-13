@@ -38,17 +38,19 @@ namespace RevitAgent.MainProcesser
                 yield break;
             }
 
-            for (double d = spacing; d < width; d += spacing)
+            int intervals = (int)Math.Ceiling(width / spacing);
+            if (intervals <= 1)
             {
-                double t = minProj + d;
+                yield break;
+            }
+
+            double actualSpacing = width / intervals;
+            for (int i = 1; i <= intervals - 1; i++)
+            {
+                double t = minProj + (actualSpacing * i);
                 foreach (var seg in IntersectPolygonWithLine(polygon, u, v, t, z))
                 {
                     yield return seg;
-                }
-
-                if (width - d < spacing)
-                {
-                    yield break;
                 }
             }
         }
@@ -194,4 +196,3 @@ namespace RevitAgent.MainProcesser
         }
     }
 }
-

@@ -1,7 +1,7 @@
 # RevitAgent
 
-提供一个“主梁布置”命令：
-- UI（`UI/MainBeamLayoutWindow.xaml`）负责交互与选择结构柱
+提供一个“主次梁布置”命令：
+- UI（`UI/MainBeamLayoutWindow.xaml`）负责交互与选择混凝土柱
 - 后端逻辑通过 `ExternalEvent`（`Commands/MainBeamLayoutEventHandler.cs`）在 Revit 上下文中创建视图副本并绘制模型线
 
 ## Build
