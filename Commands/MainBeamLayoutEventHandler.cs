@@ -73,9 +73,13 @@ namespace RevitAgent.Commands
                     return;
                 }
 
+                var missingPreview = string.IsNullOrWhiteSpace(result.MissingBeamTypeNamesPreview)
+                    ? string.Empty
+                    : "\n" + result.MissingBeamTypeNamesPreview;
+
                 TaskDialog.Show(
                     "RevitAgent",
-                    $"完成。\n柱: {result.ColumnCount}\n楼板: {result.FloorCount}\n面数: {result.FaceCount}\n主梁: {result.MainBeamCount}\n次梁: {result.SecondaryBeamCount}");
+                    $"完成。\n柱: {result.ColumnCount}\n楼板: {result.FloorCount}\n面数: {result.FaceCount}\n主梁(布局): {result.MainBeamCount}\n次梁(布局): {result.SecondaryBeamCount}\n已放置梁: {result.PlacedBeamCount}\n缺少类型: {result.MissingBeamTypeCount}{missingPreview}");
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {

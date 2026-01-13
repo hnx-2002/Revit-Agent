@@ -3,10 +3,30 @@ using Autodesk.Revit.DB;
 
 namespace RevitAgent.Utils
 {
+    internal enum BeamRole
+    {
+        Main = 0,
+        Secondary = 1,
+    }
+
+    internal sealed class BeamPlacementInfo
+    {
+        public BeamRole Role { get; set; }
+        public XYZ Start { get; set; }
+        public XYZ End { get; set; }
+
+        public double Length => Start == null || End == null ? 0.0 : Start.DistanceTo(End);
+    }
+
     internal sealed class BeamLayoutData
     {
         public List<ElementId> MainBeamCurveIds { get; } = new List<ElementId>();
         public List<ElementId> SecondaryBeamCurveIds { get; } = new List<ElementId>();
+
+        // In-memory snapshot of layout geometry for placing real beams.
+        public List<BeamPlacementInfo> BeamPlacements { get; } = new List<BeamPlacementInfo>();
+
+        public List<ElementId> PlacedBeamInstanceIds { get; } = new List<ElementId>();
     }
 
     internal static class BeamLayoutStore

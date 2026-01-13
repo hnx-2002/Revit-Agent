@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Structure;
 using RevitAgent.Utils;
 
 namespace RevitAgent.MainProcesser
@@ -13,6 +14,9 @@ namespace RevitAgent.MainProcesser
         public int FaceCount { get; internal set; }
         public int MainBeamCount { get; internal set; }
         public int SecondaryBeamCount { get; internal set; }
+        public int PlacedBeamCount { get; internal set; }
+        public int MissingBeamTypeCount { get; internal set; }
+        public string MissingBeamTypeNamesPreview { get; internal set; }
         public string ErrorMessage { get; internal set; }
     }
 
@@ -112,6 +116,7 @@ namespace RevitAgent.MainProcesser
 
             double z = floorZ;
 
+            BeamPlacementExecutionResult beamPlacementResult = null;
             using (var tx = new Transaction(doc, "RevitAgent - Beam layout"))
             {
                 tx.Start();
@@ -119,6 +124,8 @@ namespace RevitAgent.MainProcesser
                 var store = BeamLayoutStore.GetOrCreate(doc);
                 store.MainBeamCurveIds.Clear();
                 store.SecondaryBeamCurveIds.Clear();
+                store.BeamPlacements.Clear();
+                store.PlacedBeamInstanceIds.Clear();
 
                 var sketchPlane = CreateSketchPlaneAtZ(doc, z);
 
@@ -132,6 +139,12 @@ namespace RevitAgent.MainProcesser
                     var curve = doc.Create.NewModelCurve(line, sketchPlane);
                     TagCurve(curve, "RevitAgent-MainBeam");
                     store.MainBeamCurveIds.Add(curve.Id);
+                    store.BeamPlacements.Add(new BeamPlacementInfo
+                    {
+                        Role = BeamRole.Main,
+                        Start = line.GetEndPoint(0),
+                        End = line.GetEndPoint(1),
+                    });
                 }
 
                 double spacing = MmToFeet(secondarySpacingMm);
@@ -148,17 +161,335 @@ namespace RevitAgent.MainProcesser
                         var curve = doc.Create.NewModelCurve(segment, sketchPlane);
                         TagCurve(curve, "RevitAgent-SecondaryBeam");
                         store.SecondaryBeamCurveIds.Add(curve.Id);
+                        store.BeamPlacements.Add(new BeamPlacementInfo
+                        {
+                            Role = BeamRole.Secondary,
+                            Start = segment.GetEndPoint(0),
+                            End = segment.GetEndPoint(1),
+                        });
+                    }
+                }
+
+                beamPlacementResult = PlaceRealBeams(doc, targetPlan, store.BeamPlacements, store.PlacedBeamInstanceIds);
+                if (beamPlacementResult.MissingTypeNames.Count == 0)
+                {
+                    var guideIds = new List<ElementId>();
+                    guideIds.AddRange(store.MainBeamCurveIds);
+                    guideIds.AddRange(store.SecondaryBeamCurveIds);
+                    if (guideIds.Count > 0)
+                    {
+                        try
+                        {
+                            doc.Delete(guideIds);
+                            store.MainBeamCurveIds.Clear();
+                            store.SecondaryBeamCurveIds.Clear();
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
                     }
                 }
 
                 tx.Commit();
 
                 result.FaceCount = facesResult.FacesCount;
-                result.MainBeamCount = store.MainBeamCurveIds.Count;
-                result.SecondaryBeamCount = store.SecondaryBeamCurveIds.Count;
+                result.MainBeamCount = store.BeamPlacements.Count(x => x.Role == BeamRole.Main);
+                result.SecondaryBeamCount = store.BeamPlacements.Count(x => x.Role == BeamRole.Secondary);
+                result.PlacedBeamCount = store.PlacedBeamInstanceIds.Count;
+                result.MissingBeamTypeCount = beamPlacementResult.MissingTypeNames.Count;
+                result.MissingBeamTypeNamesPreview = beamPlacementResult.MissingTypeNamesPreview;
             }
 
             return result;
+        }
+
+        private sealed class BeamPlacementExecutionResult
+        {
+            public List<string> MissingTypeNames { get; } = new List<string>();
+            public string MissingTypeNamesPreview { get; set; }
+        }
+
+        private static BeamPlacementExecutionResult PlaceRealBeams(
+            Document doc,
+            ViewPlan targetPlan,
+            IList<BeamPlacementInfo> placements,
+            IList<ElementId> placedInstanceIds)
+        {
+            var exec = new BeamPlacementExecutionResult();
+            if (doc == null || targetPlan == null)
+            {
+                return exec;
+            }
+
+            if (placements == null || placements.Count == 0)
+            {
+                return exec;
+            }
+
+            var level = targetPlan.GenLevel ?? doc.GetElement(targetPlan.LevelId) as Level;
+            if (level == null)
+            {
+                return exec;
+            }
+
+            var symbols = CollectConcreteBeamSymbols(doc);
+            if (symbols.Count == 0)
+            {
+                // No candidates; treat all as missing to keep guide lines for review.
+                foreach (var p in placements)
+                {
+                    if (p == null)
+                    {
+                        continue;
+                    }
+
+                    var name = ComputeBeamTypeName(p.Role, p.Length);
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        exec.MissingTypeNames.Add(name);
+                    }
+                }
+
+                exec.MissingTypeNamesPreview = FormatMissingTypeNamesPreview(exec.MissingTypeNames);
+                return exec;
+            }
+
+            var byNormalizedName = new Dictionary<string, FamilySymbol>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in symbols)
+            {
+                var key = NormalizeBeamTypeName(s?.Name);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                if (!byNormalizedName.ContainsKey(key))
+                {
+                    byNormalizedName[key] = s;
+                }
+            }
+
+            var missingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var placement in placements)
+            {
+                if (placement == null || placement.Start == null || placement.End == null)
+                {
+                    continue;
+                }
+
+                var line = Line.CreateBound(placement.Start, placement.End);
+                string typeName = ComputeBeamTypeName(placement.Role, line.Length);
+                var normalizedTypeName = NormalizeBeamTypeName(typeName);
+
+                if (!byNormalizedName.TryGetValue(normalizedTypeName, out var symbol) || symbol == null)
+                {
+                    missingNames.Add(typeName);
+                    continue;
+                }
+
+                try
+                {
+                    if (!symbol.IsActive)
+                    {
+                        symbol.Activate();
+                        doc.Regenerate();
+                    }
+
+                    var beam = doc.Create.NewFamilyInstance(line, symbol, level, StructuralType.Beam);
+                    TagElement(beam, placement.Role == BeamRole.Main ? "RevitAgent-MainBeam" : "RevitAgent-SecondaryBeam");
+
+                    double offset = placement.Start.Z - level.Elevation;
+                    TrySetInstanceOffsetParams(beam, offset);
+
+                    if (beam != null)
+                    {
+                        placedInstanceIds?.Add(beam.Id);
+                    }
+                }
+                catch
+                {
+                    missingNames.Add(typeName);
+                }
+            }
+
+            exec.MissingTypeNames.AddRange(missingNames.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+            exec.MissingTypeNamesPreview = FormatMissingTypeNamesPreview(exec.MissingTypeNames);
+            return exec;
+        }
+
+        private static List<FamilySymbol> CollectConcreteBeamSymbols(Document doc)
+        {
+            if (doc == null)
+            {
+                return new List<FamilySymbol>();
+            }
+
+            return new FilteredElementCollector(doc)
+                .OfClass(typeof(FamilySymbol))
+                .OfCategory(BuiltInCategory.OST_StructuralFraming)
+                .Cast<FamilySymbol>()
+                .Where(IsConcreteBeamSymbol)
+                .ToList();
+        }
+
+        private static bool IsConcreteBeamSymbol(FamilySymbol symbol)
+        {
+            if (symbol == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var familyName = symbol.FamilyName ?? symbol.Family?.Name ?? string.Empty;
+                return familyName.IndexOf("混凝土梁", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ComputeBeamTypeName(BeamRole role, double lengthFeet)
+        {
+            double lengthMm = FeetToMm(lengthFeet);
+            double lengthM = lengthMm / 1000.0;
+
+            if (role == BeamRole.Main)
+            {
+                int widthMm = lengthM < 6.5 ? 250 : 300;
+                int heightMm = RoundUpToMultiple((int)Math.Ceiling(lengthMm / 12.0), 50);
+                return $"{widthMm}*{heightMm}";
+            }
+
+            int secondaryHeightMm = RoundUpToMultiple((int)Math.Ceiling(lengthMm / 15.0), 50);
+            if (secondaryHeightMm < 300)
+            {
+                secondaryHeightMm = 300;
+            }
+
+            int secondaryWidthMm;
+            if (secondaryHeightMm <= 700)
+            {
+                secondaryWidthMm = 250;
+            }
+            else
+            {
+                secondaryWidthMm = RoundUpToMultiple((int)Math.Ceiling(secondaryHeightMm / 3.0), 50);
+            }
+
+            return $"{secondaryWidthMm}*{secondaryHeightMm}";
+        }
+
+        private static string NormalizeBeamTypeName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return string.Empty;
+            }
+
+            var s = name.Trim()
+                .Replace(" ", string.Empty)
+                .Replace("×", "*")
+                .Replace("x", "*")
+                .Replace("X", "*");
+
+            while (s.Contains("**"))
+            {
+                s = s.Replace("**", "*");
+            }
+
+            return s;
+        }
+
+        private static int RoundUpToMultiple(int value, int multiple)
+        {
+            if (multiple <= 0)
+            {
+                return value;
+            }
+
+            int rem = value % multiple;
+            if (rem == 0)
+            {
+                return value;
+            }
+
+            return value + (multiple - rem);
+        }
+
+        private static double FeetToMm(double feet)
+        {
+            const double mmPerFoot = 304.8;
+            return feet * mmPerFoot;
+        }
+
+        private static void TagElement(Element element, string tag)
+        {
+            if (element == null || string.IsNullOrWhiteSpace(tag))
+            {
+                return;
+            }
+
+            try
+            {
+                var p = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+                if (p != null && !p.IsReadOnly)
+                {
+                    p.Set(tag);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private static void TrySetInstanceOffsetParams(FamilyInstance beam, double offsetFromLevel)
+        {
+            if (beam == null)
+            {
+                return;
+            }
+
+            TrySetDoubleParam(beam, BuiltInParameter.INSTANCE_ELEVATION_PARAM, offsetFromLevel);
+            TrySetDoubleParam(beam, BuiltInParameter.STRUCTURAL_BEAM_END0_ELEVATION, offsetFromLevel);
+            TrySetDoubleParam(beam, BuiltInParameter.STRUCTURAL_BEAM_END1_ELEVATION, offsetFromLevel);
+        }
+
+        private static void TrySetDoubleParam(Element element, BuiltInParameter bip, double value)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var p = element.get_Parameter(bip);
+                if (p != null && !p.IsReadOnly && p.StorageType == StorageType.Double)
+                {
+                    p.Set(value);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private static string FormatMissingTypeNamesPreview(IList<string> names)
+        {
+            if (names == null || names.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            const int limit = 10;
+            var preview = names.Take(limit).ToList();
+            var suffix = names.Count > limit ? $" ...(+{names.Count - limit})" : string.Empty;
+            return string.Join(", ", preview) + suffix;
         }
 
         private static bool IsConcreteColumn(Element element)
