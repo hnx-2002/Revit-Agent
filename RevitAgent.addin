@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>RevitAgent</Name>
+    <Assembly>Revit Agent\RevitAgent.dll</Assembly>
+    <AddInId>3B350C9F-2A4E-4CE5-8E2B-12A9C928FC97</AddInId>
+    <FullClassName>RevitAgent.Application</FullClassName>
+    <VendorId>RVT</VendorId>
+    <VendorDescription>RevitAgent sample application</VendorDescription>
+  </AddIn>
+</RevitAddIns>
