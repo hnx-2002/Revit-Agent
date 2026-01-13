@@ -9,3 +9,4 @@ C:\Users\Administrator\Desktop\Revit Agent\obj\Debug\RevitAgent.GeneratedMSBuild
 C:\Users\Administrator\Desktop\Revit Agent\obj\Debug\RevitAgent.csproj.CoreCompileInputs.cache
 C:\Users\Administrator\Desktop\Revit Agent\obj\Debug\RevitAgent.dll
 C:\Users\Administrator\Desktop\Revit Agent\obj\Debug\RevitAgent.pdb
+C:\Users\Administrator\Desktop\Revit Agent\obj\Debug\RevitAgent.sourcelink.json
