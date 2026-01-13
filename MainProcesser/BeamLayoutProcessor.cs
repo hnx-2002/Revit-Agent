@@ -71,6 +71,11 @@ namespace RevitAgent.MainProcesser
             foreach (var id in columnCandidateIds)
             {
                 var element = doc.GetElement(id);
+                if (!IsConcreteColumn(element))
+                {
+                    continue;
+                }
+
                 if (!TryGetColumnPlacementPoint(doc, element, out XYZ placementPoint))
                 {
                     continue;
@@ -154,6 +159,26 @@ namespace RevitAgent.MainProcesser
             }
 
             return result;
+        }
+
+        private static bool IsConcreteColumn(Element element)
+        {
+            if (element == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var typeElement = element.Document?.GetElement(element.GetTypeId()) as ElementType;
+                var name = typeElement?.Name ?? element.Name ?? string.Empty;
+                name = name.TrimStart();
+                return name.Length > 0 && char.IsDigit(name[0]);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void TagCurve(ModelCurve curve, string tag)
@@ -352,4 +377,3 @@ namespace RevitAgent.MainProcesser
         }
     }
 }
-
