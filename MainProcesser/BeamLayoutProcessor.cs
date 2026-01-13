@@ -170,10 +170,14 @@ namespace RevitAgent.MainProcesser
 
             try
             {
-                var typeElement = element.Document?.GetElement(element.GetTypeId()) as ElementType;
-                var name = typeElement?.Name ?? element.Name ?? string.Empty;
-                name = name.TrimStart();
-                return name.Length > 0 && char.IsDigit(name[0]);
+                if (element is not FamilyInstance fi)
+                {
+                    return false;
+                }
+
+                var symbol = fi.Symbol;
+                var familyName = symbol?.FamilyName ?? symbol?.Family?.Name ?? string.Empty;
+                return familyName.IndexOf("混凝土柱", StringComparison.OrdinalIgnoreCase) >= 0;
             }
             catch
             {
