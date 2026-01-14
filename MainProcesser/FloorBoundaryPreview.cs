@@ -7,6 +7,12 @@ namespace RevitAgent.MainProcesser
 {
     internal static class FloorBoundaryPreview
     {
+        internal sealed class TaggedLoop
+        {
+            public bool IsOuter { get; set; }
+            public IList<Curve> Curves { get; set; }
+        }
+
         internal sealed class BoundaryLoopsResult
         {
             public double TopZ { get; set; }
@@ -14,7 +20,7 @@ namespace RevitAgent.MainProcesser
             public string ErrorMessage { get; set; }
         }
 
-        internal static BoundaryLoopsResult GetTopFaceBoundaryLoops(Element floorElement, Document doc)
+        internal static BoundaryLoopsResult GetTopFaceBoundaryLoops(Element floorElement, Document doc, double? forceZ = null)
         {
             var result = new BoundaryLoopsResult();
             if (floorElement == null || doc == null)
@@ -46,7 +52,8 @@ namespace RevitAgent.MainProcesser
                     return result;
                 }
 
-                result.TopZ = topZ;
+                double zToUse = forceZ ?? topZ;
+                result.TopZ = zToUse;
 
                 var loops = new List<List<Curve>>();
                 foreach (EdgeArray edgeArray in topFace.EdgeLoops)
@@ -65,7 +72,7 @@ namespace RevitAgent.MainProcesser
                             continue;
                         }
 
-                        curves.Add(ForceCurveToZ(c, topZ));
+                        curves.Add(ForceCurveToZ(c, zToUse));
                     }
 
                     if (curves.Count > 0)
@@ -141,6 +148,48 @@ namespace RevitAgent.MainProcesser
                 }
 
                 loopIndex++;
+            }
+        }
+
+        internal static void DrawPreviewCurves(
+            Document doc,
+            IEnumerable<TaggedLoop> loops,
+            double z,
+            string tagPrefix = "RevitAgent-FloorBoundary")
+        {
+            if (doc == null || loops == null)
+            {
+                return;
+            }
+
+            ClearExistingPreviewCurves(doc, tagPrefix);
+
+            var sketchPlane = CreateSketchPlaneAtZ(doc, z);
+            foreach (var loop in loops)
+            {
+                if (loop?.Curves == null)
+                {
+                    continue;
+                }
+
+                string tag = loop.IsOuter ? (tagPrefix + "-Outer") : (tagPrefix + "-Hole");
+                foreach (var curve in loop.Curves)
+                {
+                    if (curve == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var mc = doc.Create.NewModelCurve(curve, sketchPlane);
+                        TagCurve(mc, tag);
+                    }
+                    catch
+                    {
+                        // ignore per-curve failures
+                    }
+                }
             }
         }
 

@@ -45,7 +45,7 @@ namespace RevitAgent.MainProcesser
             foreach (var id in pickedIds)
             {
                 var element = doc.GetElement(id);
-                if (ElementClassifier.IsStructuralColumn(element))
+                if (ElementClassifier.IsConcreteRectColumn(element))
                 {
                     columnCandidateIds.Add(id);
                 }
@@ -58,65 +58,49 @@ namespace RevitAgent.MainProcesser
 
             result.FloorCount = floorIds.Count;
 
-            if (floorIds.Count > 1)
-            {
-                result.ErrorMessage = "Current rule: select exactly 1 floor slab.";
-                return result;
-            }
-
             if (floorIds.Count < 1)
             {
-                result.ErrorMessage = "请至少框选 1 个楼板，用于确定主梁生成高度并过滤柱子。";
+                result.ErrorMessage = "请至少框选 1 个楼板，用于提取外边界与孔洞。";
                 return result;
             }
 
-            var floorElement = doc.GetElement(floorIds[0]);
-            var boundary = FloorBoundaryPreview.GetTopFaceBoundaryLoops(floorElement, doc);
-            if (!string.IsNullOrWhiteSpace(boundary.ErrorMessage))
+            if (!ViewPlanUtils.TryGetPlanViewZ(doc, targetPlan, out double viewZ))
             {
-                result.ErrorMessage = boundary.ErrorMessage;
+                result.ErrorMessage = "无法从当前平面视图获取高度（Level 解析失败）。";
                 return result;
             }
 
-            if (!TryGetAverageTopZ(doc, floorIds, out double floorZ))
+            var previewLoops = new List<FloorBoundaryPreview.TaggedLoop>();
+            foreach (var floorId in floorIds)
             {
-                result.ErrorMessage = "无法从所选楼板获取高度（BoundingBox/Level 解析失败）。";
-                return result;
+                var floorElement = doc.GetElement(floorId);
+                var boundary = FloorBoundaryPreview.GetTopFaceBoundaryLoops(floorElement, doc, forceZ: viewZ);
+                if (!string.IsNullOrWhiteSpace(boundary.ErrorMessage))
+                {
+                    result.ErrorMessage = boundary.ErrorMessage;
+                    return result;
+                }
+
+                for (int i = 0; i < boundary.Loops.Count; i++)
+                {
+                    previewLoops.Add(new FloorBoundaryPreview.TaggedLoop
+                    {
+                        IsOuter = i == 0,
+                        Curves = boundary.Loops[i]
+                    });
+                }
             }
 
-            floorZ = boundary.TopZ;
-
-            const double zTol = 1e-6;
-            var columnIds = new List<ElementId>();
-            foreach (var id in columnCandidateIds)
-            {
-                var element = doc.GetElement(id);
-                if (!IsConcreteColumn(element))
-                {
-                    continue;
-                }
-
-                if (!TryGetColumnPlacementPoint(doc, element, out XYZ placementPoint))
-                {
-                    continue;
-                }
-
-                if (placementPoint.Z > floorZ + zTol)
-                {
-                    continue;
-                }
-
-                columnIds.Add(id);
-            }
+            var columnIds = columnCandidateIds.Distinct().ToList();
 
             result.ColumnCount = columnIds.Count;
             if (columnIds.Count < 3)
             {
-                result.ErrorMessage = "过滤后可用结构柱不足 3 个（柱放置点需在楼板平面以下）。";
+                result.ErrorMessage = "可用混凝土矩形柱不足 3 个（族名需以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内）。";
                 return result;
             }
 
-            var points = CollectColumnPoints(doc, columnIds);
+            var points = CollectColumnPoints(doc, columnIds, viewZ);
             if (points.Count < 3)
             {
                 result.ErrorMessage = "可用的柱点数量不足（柱需包含 LocationPoint）。";
@@ -130,7 +114,7 @@ namespace RevitAgent.MainProcesser
                 return result;
             }
 
-            double z = floorZ;
+            double z = viewZ;
 
             BeamPlacementExecutionResult beamPlacementResult = null;
             using (var tx = new Transaction(doc, "RevitAgent - Beam layout"))
@@ -143,7 +127,7 @@ namespace RevitAgent.MainProcesser
                 store.BeamPlacements.Clear();
                 store.PlacedBeamInstanceIds.Clear();
 
-                FloorBoundaryPreview.DrawPreviewCurves(doc, boundary.Loops, z, "RevitAgent-FloorBoundary");
+                FloorBoundaryPreview.DrawPreviewCurves(doc, previewLoops, z, "RevitAgent-FloorBoundary");
 
                 var sketchPlane = CreateSketchPlaneAtZ(doc, z);
 
@@ -317,7 +301,7 @@ namespace RevitAgent.MainProcesser
                     var beam = doc.Create.NewFamilyInstance(line, symbol, level, StructuralType.Beam);
                     TagElement(beam, placement.Role == BeamRole.Main ? "RevitAgent-MainBeam" : "RevitAgent-SecondaryBeam");
 
-                    double offset = placement.Start.Z - level.Elevation;
+                    double offset = placement.Start.Z - level.ProjectElevation;
                     TrySetInstanceOffsetParams(beam, offset);
 
                     if (beam != null)
@@ -510,30 +494,6 @@ namespace RevitAgent.MainProcesser
             return string.Join(", ", preview) + suffix;
         }
 
-        private static bool IsConcreteColumn(Element element)
-        {
-            if (element == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                if (element is not FamilyInstance fi)
-                {
-                    return false;
-                }
-
-                var symbol = fi.Symbol;
-                var familyName = symbol?.FamilyName ?? symbol?.Family?.Name ?? string.Empty;
-                return familyName.IndexOf("混凝土柱", StringComparison.OrdinalIgnoreCase) >= 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private static void TagCurve(ModelCurve curve, string tag)
         {
             if (curve == null || string.IsNullOrWhiteSpace(tag))
@@ -567,166 +527,18 @@ namespace RevitAgent.MainProcesser
             return SketchPlane.Create(doc, plane);
         }
 
-        private static List<XYZ> CollectColumnPoints(Document doc, IList<ElementId> ids)
+        private static List<XYZ> CollectColumnPoints(Document doc, IList<ElementId> ids, double viewZ)
         {
             var points = new List<XYZ>();
             foreach (var id in ids)
             {
                 var element = doc.GetElement(id);
-                if (TryGetColumnPlacementPoint(doc, element, out XYZ placementPoint))
+                if (ElementClassifier.TryGetColumnPointAtZ(doc, element, viewZ, out XYZ placementPoint))
                 {
                     points.Add(placementPoint);
                 }
             }
             return points;
-        }
-
-        private static bool TryGetColumnPlacementPoint(Document doc, Element element, out XYZ placementPoint)
-        {
-            placementPoint = null;
-            if (doc == null || element == null)
-            {
-                return false;
-            }
-
-            if (element.Location is not LocationPoint lp)
-            {
-                return false;
-            }
-
-            double x = lp.Point.X;
-            double y = lp.Point.Y;
-
-            double offset = 0.0;
-            try
-            {
-                var offsetParam = element.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_OFFSET_PARAM) ??
-                                  element.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
-                if (offsetParam != null && offsetParam.StorageType == StorageType.Double)
-                {
-                    offset = offsetParam.AsDouble();
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            try
-            {
-                ElementId levelId = ElementId.InvalidElementId;
-
-                var baseLevelParam = element.get_Parameter(BuiltInParameter.FAMILY_BASE_LEVEL_PARAM);
-                if (baseLevelParam != null && baseLevelParam.StorageType == StorageType.ElementId)
-                {
-                    levelId = baseLevelParam.AsElementId();
-                }
-
-                if (levelId == ElementId.InvalidElementId && element.LevelId != ElementId.InvalidElementId)
-                {
-                    levelId = element.LevelId;
-                }
-
-                if (levelId != ElementId.InvalidElementId)
-                {
-                    var level = doc.GetElement(levelId) as Level;
-                    if (level != null)
-                    {
-                        placementPoint = new XYZ(x, y, level.Elevation + offset);
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            placementPoint = new XYZ(x, y, lp.Point.Z + offset);
-            return true;
-        }
-
-        private static bool TryGetAverageTopZ(Document doc, IList<ElementId> elementIds, out double averageTopZ)
-        {
-            averageTopZ = 0.0;
-            if (doc == null || elementIds == null || elementIds.Count == 0)
-            {
-                return false;
-            }
-
-            var zCandidates = new List<double>();
-            foreach (var id in elementIds)
-            {
-                var element = doc.GetElement(id);
-                if (element == null)
-                {
-                    continue;
-                }
-
-                if (TryGetElementTopZ(element, doc, out double topZ))
-                {
-                    zCandidates.Add(topZ);
-                }
-            }
-
-            if (zCandidates.Count == 0)
-            {
-                return false;
-            }
-
-            averageTopZ = zCandidates.Average();
-            return true;
-        }
-
-        private static bool TryGetElementTopZ(Element element, Document doc, out double topZ)
-        {
-            topZ = 0.0;
-            if (element == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                var bbox = element.get_BoundingBox(null);
-                if (bbox != null)
-                {
-                    topZ = bbox.Max.Z;
-                    return true;
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            try
-            {
-                if (element.LevelId != ElementId.InvalidElementId)
-                {
-                    var level = doc.GetElement(element.LevelId) as Level;
-                    if (level != null)
-                    {
-                        double z = level.Elevation;
-
-                        var offsetParam = element.get_Parameter(BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM) ??
-                                          element.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
-                        if (offsetParam != null && offsetParam.StorageType == StorageType.Double)
-                        {
-                            z += offsetParam.AsDouble();
-                        }
-
-                        topZ = z;
-                        return true;
-                    }
-                }
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return false;
         }
     }
 }

@@ -43,7 +43,7 @@ namespace RevitAgent.UI
             {
                 Hide();
 
-                if (_doc.ActiveView is not ViewPlan)
+                if (_doc.ActiveView is not ViewPlan activePlan)
                 {
                     MessageBox.Show(this, "请先激活一个结构平面视图（ViewPlan）再进行框选。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
@@ -56,16 +56,47 @@ namespace RevitAgent.UI
                     return;
                 }
 
+                if (!ViewPlanUtils.TryGetPlanViewZ(_doc, activePlan, out double viewZ))
+                {
+                    MessageBox.Show(this, "无法从当前平面视图获取高度（Level 解析失败）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                const double zTol = 1e-6;
                 _selectedElementIds.Clear();
-                _selectedElementIds.AddRange(
-                    picked
-                        .Where(e => e != null)
-                        .Select(e => e.Id)
-                        .Where(id => id != null && id != ElementId.InvalidElementId)
-                        .Distinct());
+                foreach (var element in picked.Where(e => e != null))
+                {
+                    if (ElementClassifier.IsFloor(element))
+                    {
+                        _selectedElementIds.Add(element.Id);
+                        continue;
+                    }
+
+                    if (!ElementClassifier.IsConcreteRectColumn(element))
+                    {
+                        continue;
+                    }
+
+                    if (!ElementClassifier.TryGetColumnVerticalRange(_doc, element, out double minZ, out double maxZ))
+                    {
+                        continue;
+                    }
+
+                    if (viewZ < minZ - zTol || viewZ > maxZ + zTol)
+                    {
+                        continue;
+                    }
+
+                    _selectedElementIds.Add(element.Id);
+                }
+
+                _selectedElementIds.RemoveAll(id => id == null || id == ElementId.InvalidElementId);
+                var distinct = _selectedElementIds.Distinct().ToList();
+                _selectedElementIds.Clear();
+                _selectedElementIds.AddRange(distinct);
 
                 UpdateSelectedColumnsText();
-                OkButton.IsEnabled = CountStructuralColumns() >= 3 && CountFloors() == 1;
+                OkButton.IsEnabled = CountStructuralColumns() >= 3 && CountFloors() >= 1;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -86,19 +117,13 @@ namespace RevitAgent.UI
         {
             if (CountStructuralColumns() < 3)
             {
-                MessageBox.Show(this, "请至少选择 3 个结构柱（可同时框选楼板等其他元素）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            if (CountFloors() > 1)
-            {
-                MessageBox.Show(this, "请只选择一个楼板", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "请至少选择 3 个混凝土矩形柱（族名以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             if (CountFloors() < 1)
             {
-                MessageBox.Show(this, "请至少框选 1 个楼板，用于确定主次梁生成高度并过滤柱子。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "请至少框选 1 个楼板，用于提取外边界与孔洞。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -149,7 +174,7 @@ namespace RevitAgent.UI
             foreach (var id in _selectedElementIds)
             {
                 var element = _doc.GetElement(id);
-                if (ElementClassifier.IsStructuralColumn(element))
+                if (ElementClassifier.IsConcreteRectColumn(element))
                 {
                     count++;
                 }
