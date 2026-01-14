@@ -92,13 +92,13 @@ namespace RevitAgent.UI
 
             if (CountFloors() > 1)
             {
-                MessageBox.Show(this, "Please select exactly 1 floor slab.", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "请只选择一个楼板", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             if (CountFloors() < 1)
             {
-                MessageBox.Show(this, "请至少框选 1 个楼板，用于确定主梁生成高度并过滤柱子。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "请至少框选 1 个楼板，用于确定主次梁生成高度并过滤柱子。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
