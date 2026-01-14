@@ -65,7 +65,7 @@ namespace RevitAgent.UI
                         .Distinct());
 
                 UpdateSelectedColumnsText();
-                OkButton.IsEnabled = CountStructuralColumns() >= 3 && CountFloors() >= 1;
+                OkButton.IsEnabled = CountStructuralColumns() >= 3 && CountFloors() == 1;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -87,6 +87,12 @@ namespace RevitAgent.UI
             if (CountStructuralColumns() < 3)
             {
                 MessageBox.Show(this, "请至少选择 3 个结构柱（可同时框选楼板等其他元素）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (CountFloors() > 1)
+            {
+                MessageBox.Show(this, "Please select exactly 1 floor slab.", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 

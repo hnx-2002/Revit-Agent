@@ -14,13 +14,14 @@ namespace RevitAgent.Commands
     [Transaction(TransactionMode.Manual)]
     public class MainBeamLayoutCommand : IExternalCommand
     {
-        private const string DefaultLayoutPlanName = "\u5e03\u7f6e\u65b9\u6848\u5e73\u9762";
+        private const string DefaultLayoutPlanName = "布置方案平面";
+        private static MainBeamLayoutWindow _window;
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             try
             {
-                var uiDoc = commandData.Application.ActiveUIDocument;
+                var uiDoc = commandData?.Application?.ActiveUIDocument;
                 if (uiDoc == null)
                 {
                     message = "No active document.";
@@ -33,15 +34,41 @@ namespace RevitAgent.Commands
                     return Result.Cancelled;
                 }
 
+                if (_window != null)
+                {
+                    try
+                    {
+                        if (_window.WindowState == WindowState.Minimized)
+                        {
+                            _window.WindowState = WindowState.Normal;
+                        }
+
+                        _window.Topmost = false;
+                        _window.Activate();
+                        return Result.Succeeded;
+                    }
+                    catch
+                    {
+                        _window = null;
+                    }
+                }
+
                 var win = new MainBeamLayoutWindow(uiDoc)
                 {
-                    Title = "主梁布置",
-                    WindowStartupLocation = WindowStartupLocation.CenterOwner
+                    Title = "主次梁布置",
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Topmost = false,
+                    ShowInTaskbar = false,
                 };
+
+                win.Closed += (_, __) => _window = null;
 
                 TryAttachOwner(win);
 
-                win.ShowDialog();
+                // Modeless: allow interacting with Revit while this window is open.
+                _window = win;
+                win.Show();
+                win.Activate();
                 return Result.Succeeded;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
@@ -71,7 +98,7 @@ namespace RevitAgent.Commands
 
             if (doc.ActiveView is not ViewPlan activePlan)
             {
-                TaskDialog.Show("RevitAgent", "请先激活一个结构平面视图（ViewPlan），再运行主梁布置。");
+                TaskDialog.Show("RevitAgent", "请先激活一个结构平面视图（ViewPlan），再运行主次梁布置。");
                 return null;
             }
 
@@ -175,3 +202,4 @@ namespace RevitAgent.Commands
         }
     }
 }
+

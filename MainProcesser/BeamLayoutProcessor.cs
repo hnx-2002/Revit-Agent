@@ -58,9 +58,23 @@ namespace RevitAgent.MainProcesser
 
             result.FloorCount = floorIds.Count;
 
+            if (floorIds.Count > 1)
+            {
+                result.ErrorMessage = "Current rule: select exactly 1 floor slab.";
+                return result;
+            }
+
             if (floorIds.Count < 1)
             {
                 result.ErrorMessage = "请至少框选 1 个楼板，用于确定主梁生成高度并过滤柱子。";
+                return result;
+            }
+
+            var floorElement = doc.GetElement(floorIds[0]);
+            var boundary = FloorBoundaryPreview.GetTopFaceBoundaryLoops(floorElement, doc);
+            if (!string.IsNullOrWhiteSpace(boundary.ErrorMessage))
+            {
+                result.ErrorMessage = boundary.ErrorMessage;
                 return result;
             }
 
@@ -69,6 +83,8 @@ namespace RevitAgent.MainProcesser
                 result.ErrorMessage = "无法从所选楼板获取高度（BoundingBox/Level 解析失败）。";
                 return result;
             }
+
+            floorZ = boundary.TopZ;
 
             const double zTol = 1e-6;
             var columnIds = new List<ElementId>();
@@ -126,6 +142,8 @@ namespace RevitAgent.MainProcesser
                 store.SecondaryBeamCurveIds.Clear();
                 store.BeamPlacements.Clear();
                 store.PlacedBeamInstanceIds.Clear();
+
+                FloorBoundaryPreview.DrawPreviewCurves(doc, boundary.Loops, z, "RevitAgent-FloorBoundary");
 
                 var sketchPlane = CreateSketchPlaneAtZ(doc, z);
 
