@@ -50,6 +50,8 @@ namespace RevitAgent.MainProcesser
 
             double longSpan = longAlongU ? (hole.MaxU - hole.MinU) : (hole.MaxV - hole.MinV);
             double shortSpan = longAlongU ? (hole.MaxV - hole.MinV) : (hole.MaxU - hole.MinU);
+            double centerU = (hole.MinU + hole.MaxU) * 0.5;
+            double centerV = (hole.MinV + hole.MaxV) * 0.5;
 
             if (longSpan <= oneMeterFeet + 1e-6 && shortSpan <= oneMeterFeet + 1e-6)
             {
@@ -60,13 +62,13 @@ namespace RevitAgent.MainProcesser
             {
                 if (longAlongU)
                 {
-                    placements.AddRange(IntersectAndPlaceAlong(regionPolygon, z, dirLong, dirShort, hole.MinV, BeamRole.OpeningSecondary));
-                    placements.AddRange(IntersectAndPlaceAlong(regionPolygon, z, dirLong, dirShort, hole.MaxV, BeamRole.OpeningSecondary));
+                    placements.AddRange(IntersectAndPlaceAlongWithCapping(regionPolygon, z, dirLong, dirShort, hole.MinV, centerV, BeamRole.OpeningSecondary));
+                    placements.AddRange(IntersectAndPlaceAlongWithCapping(regionPolygon, z, dirLong, dirShort, hole.MaxV, centerV, BeamRole.OpeningSecondary));
                 }
                 else
                 {
-                    placements.AddRange(IntersectAndPlaceAlong(regionPolygon, z, dirLong, dirShort, hole.MinU, BeamRole.OpeningSecondary));
-                    placements.AddRange(IntersectAndPlaceAlong(regionPolygon, z, dirLong, dirShort, hole.MaxU, BeamRole.OpeningSecondary));
+                    placements.AddRange(IntersectAndPlaceAlongWithCapping(regionPolygon, z, dirLong, dirShort, hole.MinU, centerU, BeamRole.OpeningSecondary));
+                    placements.AddRange(IntersectAndPlaceAlongWithCapping(regionPolygon, z, dirLong, dirShort, hole.MaxU, centerU, BeamRole.OpeningSecondary));
                 }
             }
 
@@ -74,33 +76,35 @@ namespace RevitAgent.MainProcesser
             {
                 if (longAlongU)
                 {
-                    placements.Add(new BeamPlacementInfo
+                    placements.Add(OffsetForCapping(new BeamPlacementInfo
                     {
                         Role = BeamRole.OpeningSecondary,
                         Start = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MinU, hole.MinV, z),
                         End = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MinU, hole.MaxV, z),
-                    });
-                    placements.Add(new BeamPlacementInfo
+                    }, hole, axis: hole.U, edgeCoord: hole.MinU, centerCoord: centerU));
+
+                    placements.Add(OffsetForCapping(new BeamPlacementInfo
                     {
                         Role = BeamRole.OpeningSecondary,
                         Start = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MaxU, hole.MinV, z),
                         End = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MaxU, hole.MaxV, z),
-                    });
+                    }, hole, axis: hole.U, edgeCoord: hole.MaxU, centerCoord: centerU));
                 }
                 else
                 {
-                    placements.Add(new BeamPlacementInfo
+                    placements.Add(OffsetForCapping(new BeamPlacementInfo
                     {
                         Role = BeamRole.OpeningSecondary,
                         Start = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MinU, hole.MinV, z),
                         End = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MaxU, hole.MinV, z),
-                    });
-                    placements.Add(new BeamPlacementInfo
+                    }, hole, axis: hole.V, edgeCoord: hole.MinV, centerCoord: centerV));
+
+                    placements.Add(OffsetForCapping(new BeamPlacementInfo
                     {
                         Role = BeamRole.OpeningSecondary,
                         Start = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MinU, hole.MaxV, z),
                         End = BeamLayoutGeometry2D.PointFromUV(hole.U, hole.V, hole.MaxU, hole.MaxV, z),
-                    });
+                    }, hole, axis: hole.V, edgeCoord: hole.MaxV, centerCoord: centerV));
                 }
             }
 
@@ -156,6 +160,103 @@ namespace RevitAgent.MainProcesser
                     Start = best.GetEndPoint(0),
                     End = best.GetEndPoint(1),
                 }
+            };
+        }
+
+        private static IEnumerable<BeamPlacementInfo> IntersectAndPlaceAlongWithCapping(
+            IList<XYZ> polygon,
+            double z,
+            XYZ u,
+            XYZ v,
+            double edgeT,
+            double centerT,
+            BeamRole role)
+        {
+            var baseSegs = BeamLayoutGeometry2D.IntersectPolygonWithLine(polygon, u, v, edgeT, z)
+                .OrderByDescending(x => x.Length)
+                .ToList();
+
+            if (baseSegs.Count == 0)
+            {
+                return Enumerable.Empty<BeamPlacementInfo>();
+            }
+
+            var baseSeg = baseSegs[0];
+            double widthFeet = BeamTypeSizing.ComputeBeamWidthFeet(role, baseSeg.Length);
+            double offset = widthFeet * 0.5;
+            if (offset <= 1e-9)
+            {
+                return new[]
+                {
+                    new BeamPlacementInfo
+                    {
+                        Role = role,
+                        Start = baseSeg.GetEndPoint(0),
+                        End = baseSeg.GetEndPoint(1),
+                    }
+                };
+            }
+
+            double sign = edgeT < centerT ? -1.0 : 1.0;
+            double tShift = edgeT + (sign * offset);
+
+            var shiftedSegs = BeamLayoutGeometry2D.IntersectPolygonWithLine(polygon, u, v, tShift, z)
+                .OrderByDescending(x => x.Length)
+                .ToList();
+
+            if (shiftedSegs.Count > 0)
+            {
+                var best = shiftedSegs[0];
+                return new[]
+                {
+                    new BeamPlacementInfo
+                    {
+                        Role = role,
+                        Start = best.GetEndPoint(0),
+                        End = best.GetEndPoint(1),
+                    }
+                };
+            }
+
+            // Fallback: translate the original segment.
+            var d = v.Multiply(sign * offset);
+            return new[]
+            {
+                new BeamPlacementInfo
+                {
+                    Role = role,
+                    Start = baseSeg.GetEndPoint(0).Add(d),
+                    End = baseSeg.GetEndPoint(1).Add(d),
+                }
+            };
+        }
+
+        private static BeamPlacementInfo OffsetForCapping(
+            BeamPlacementInfo placement,
+            OpeningRect hole,
+            XYZ axis,
+            double edgeCoord,
+            double centerCoord)
+        {
+            if (placement?.Start == null || placement.End == null || hole == null || axis == null)
+            {
+                return placement;
+            }
+
+            double widthFeet = BeamTypeSizing.ComputeBeamWidthFeet(placement.Role, placement.Length);
+            double offset = widthFeet * 0.5;
+            if (offset <= 1e-9)
+            {
+                return placement;
+            }
+
+            double sign = edgeCoord < centerCoord ? -1.0 : 1.0;
+            var d = axis.Multiply(sign * offset);
+            return new BeamPlacementInfo
+            {
+                Role = placement.Role,
+                Start = placement.Start.Add(d),
+                End = placement.End.Add(d),
             };
         }
 

@@ -262,7 +262,7 @@ namespace RevitAgent.MainProcesser
                         continue;
                     }
 
-                    var name = ComputeBeamTypeName(p.Role, p.Length);
+                    var name = BeamTypeSizing.ComputeBeamTypeName(p.Role, p.Length);
                     if (!string.IsNullOrWhiteSpace(name))
                     {
                         exec.MissingTypeNames.Add(name);
@@ -297,7 +297,7 @@ namespace RevitAgent.MainProcesser
                 }
 
                 var line = Line.CreateBound(placement.Start, placement.End);
-                string typeName = ComputeBeamTypeName(placement.Role, line.Length);
+                string typeName = BeamTypeSizing.ComputeBeamTypeName(placement.Role, line.Length);
                 var normalizedTypeName = NormalizeBeamTypeName(typeName);
 
                 if (!byNormalizedName.TryGetValue(normalizedTypeName, out var symbol) || symbol == null)
@@ -369,37 +369,6 @@ namespace RevitAgent.MainProcesser
             }
         }
 
-        private static string ComputeBeamTypeName(BeamRole role, double lengthFeet)
-        {
-            double lengthMm = FeetToMm(lengthFeet);
-            double lengthM = lengthMm / 1000.0;
-
-            if (role == BeamRole.Main)
-            {
-                int widthMm = lengthM < 6.5 ? 250 : 300;
-                int heightMm = RoundUpToMultiple((int)Math.Ceiling(lengthMm / 12.0), 50);
-                return $"{widthMm}*{heightMm}";
-            }
-
-            int secondaryHeightMm = RoundUpToMultiple((int)Math.Ceiling(lengthMm / 15.0), 50);
-            if (secondaryHeightMm < 300)
-            {
-                secondaryHeightMm = 300;
-            }
-
-            int secondaryWidthMm;
-            if (secondaryHeightMm <= 700)
-            {
-                secondaryWidthMm = 250;
-            }
-            else
-            {
-                secondaryWidthMm = RoundUpToMultiple((int)Math.Ceiling(secondaryHeightMm / 3.0), 50);
-            }
-
-            return $"{secondaryWidthMm}*{secondaryHeightMm}";
-        }
-
         private static string NormalizeBeamTypeName(string name)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -419,28 +388,6 @@ namespace RevitAgent.MainProcesser
             }
 
             return s;
-        }
-
-        private static int RoundUpToMultiple(int value, int multiple)
-        {
-            if (multiple <= 0)
-            {
-                return value;
-            }
-
-            int rem = value % multiple;
-            if (rem == 0)
-            {
-                return value;
-            }
-
-            return value + (multiple - rem);
-        }
-
-        private static double FeetToMm(double feet)
-        {
-            const double mmPerFoot = 304.8;
-            return feet * mmPerFoot;
         }
 
         private static void TagElement(Element element, string tag)

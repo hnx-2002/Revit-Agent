@@ -91,21 +91,6 @@ namespace RevitAgent.MainProcesser
             return inside;
         }
 
-        internal static bool IsPointInOrOnPolygon2D(IList<XYZ> polygon, XYZ p, double tol)
-        {
-            if (polygon == null || polygon.Count < 3 || p == null)
-            {
-                return false;
-            }
-
-            if (IsPointOnPolygonBoundary2D(polygon, p, tol))
-            {
-                return true;
-            }
-
-            return IsPointInPolygon2D(polygon, p);
-        }
-
         internal static bool IsPointStrictlyInsidePolygon2D(IList<XYZ> polygon, XYZ p, double tol)
         {
             if (polygon == null || polygon.Count < 3 || p == null)
