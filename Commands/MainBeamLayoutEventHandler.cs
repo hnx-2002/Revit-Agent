@@ -104,7 +104,7 @@ namespace RevitAgent.Commands
             using (var tx = new Transaction(doc, "RevitAgent - Duplicate plan"))
             {
                 tx.Start();
-                duplicatedViewId = source.Duplicate(ViewDuplicateOption.Duplicate);
+                duplicatedViewId = source.Duplicate(ViewDuplicateOption.WithDetailing);
                 var duplicatedView = doc.GetElement(duplicatedViewId) as View;
                 if (duplicatedView != null)
                 {

@@ -112,7 +112,7 @@ namespace RevitAgent.Commands
             {
                 tx.Start();
 
-                var duplicatedViewId = activePlan.Duplicate(ViewDuplicateOption.Duplicate);
+                var duplicatedViewId = activePlan.Duplicate(ViewDuplicateOption.WithDetailing);
                 duplicatedPlan = doc.GetElement(duplicatedViewId) as ViewPlan;
 
                 if (duplicatedPlan == null)

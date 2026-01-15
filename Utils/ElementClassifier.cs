@@ -149,7 +149,7 @@ namespace RevitAgent.Utils
                 var gs = (ln.LineStyle as GraphicsStyle);
                 int styleId = gs?.Id.IntegerValue ?? -1;
 
-                if (styleId == 7072197)
+                if (styleId == 15947562)
                     return true;
             }
             return false;

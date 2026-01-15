@@ -129,12 +129,6 @@ namespace RevitAgent.MainProcesser
             return placements;
         }
 
-        private sealed class LoadGuide
-        {
-            public Curve Curve { get; set; }
-            public XYZ SamplePoint { get; set; }
-        }
-
         private static void ClassifyGuideCurves(
             IList<Curve> curves,
             double z,
@@ -199,6 +193,7 @@ namespace RevitAgent.MainProcesser
             var placements = new List<BeamPlacementInfo>();
             var queue = new Queue<IList<XYZ>>();
             queue.Enqueue(polygon);
+            var placedLoads = new HashSet<LoadGuide>();
 
             while (queue.Count > 0)
             {
@@ -217,10 +212,14 @@ namespace RevitAgent.MainProcesser
                 {
                     // Linear processing: handle one opening, split into sub-regions, continue.
                     var hole = openingsInRegion[0];
-                    placements.AddRange(OpeningSecondaryBeamPlacement.GeneratePlacements(region, z, hole, oneMeterFeet));
+                    var openingPlacements = OpeningSecondaryBeamPlacement.GeneratePlacements(region, z, hole, oneMeterFeet)
+                        .Where(p => p?.Start != null && p.End != null)
+                        .ToList();
+                    placements.AddRange(openingPlacements);
 
-                    var subRegions = OpeningSecondaryBeamPlacement.SplitRegionByHole(region, z, hole);
-                    foreach (var sub in subRegions)
+                    var openingSubRegions = OpeningSecondaryBeamPlacement.SplitRegionByHole(region, z, hole);
+                    openingSubRegions = SplitRegionsByOpeningBeams(openingSubRegions, openingPlacements);
+                    foreach (var sub in openingSubRegions)
                     {
                         queue.Enqueue(sub);
                     }
@@ -228,22 +227,31 @@ namespace RevitAgent.MainProcesser
                     continue;
                 }
 
-                // No openings: place normal secondaries once (no recursion after normal).
+                // No openings: place load secondaries first (may split into sub-sub-sub regions), then place normal secondaries.
+                if (LoadSecondaryBeamPlacement.TryPlaceAndSplit(region, z, allLoads, placedLoads, out var loadBeam, out var subRegions))
+                {
+                    placements.Add(loadBeam);
+
+                    if (subRegions != null && subRegions.Count > 0)
+                    {
+                        foreach (var sub in subRegions)
+                        {
+                            queue.Enqueue(sub);
+                        }
+                        continue;
+                    }
+                }
+
                 if (!ShouldPlaceInSubRegion(region, minSpanFeet))
                 {
                     continue;
                 }
 
-                var loadsInRegion = (allLoads ?? new List<LoadGuide>())
-                    .Where(l => l?.SamplePoint != null && BeamLayoutGeometry2D.IsPointInPolygon2D(region, l.SamplePoint))
-                    .ToList();
-
-                var role = loadsInRegion.Count > 0 ? BeamRole.LoadSecondary : BeamRole.Secondary;
                 foreach (var segment in SecondaryBeamLayout.GenerateSegments(region, z, spacing))
                 {
                     placements.Add(new BeamPlacementInfo
                     {
-                        Role = role,
+                        Role = BeamRole.Secondary,
                         Start = segment.GetEndPoint(0),
                         End = segment.GetEndPoint(1),
                     });
@@ -251,6 +259,156 @@ namespace RevitAgent.MainProcesser
             }
 
             return placements;
+        }
+
+        private static List<IList<XYZ>> SplitRegionsByOpeningBeams(
+            List<IList<XYZ>> regions,
+            List<BeamPlacementInfo> openingPlacements)
+        {
+            if (regions == null || regions.Count == 0 || openingPlacements == null || openingPlacements.Count == 0)
+            {
+                return regions ?? new List<IList<XYZ>>();
+            }
+
+            var chords = openingPlacements
+                .Where(p => p?.Role == BeamRole.OpeningSecondary && p.Start != null && p.End != null && p.Length > 1e-6)
+                .ToList();
+            if (chords.Count == 0)
+            {
+                return regions;
+            }
+
+            const double tol = 1e-6;
+            var current = regions.ToList();
+            foreach (var chord in chords)
+            {
+                var next = new List<IList<XYZ>>();
+                foreach (var region in current)
+                {
+                    var poly = BeamLayoutGeometry2D.NormalizePolygon2D(region, tol);
+                    if (poly == null || poly.Count < 3)
+                    {
+                        continue;
+                    }
+
+                    if (!TryGetChordBoundaryIntersections(poly, chord.Start, chord.End, tol, out var a, out var b))
+                    {
+                        next.Add(poly);
+                        continue;
+                    }
+
+                    var split = SecondaryRegionSplitter.SplitRegionByChord(poly, a, b);
+                    if (split.Count > 0)
+                    {
+                        next.AddRange(split);
+                    }
+                    else
+                    {
+                        next.Add(poly);
+                    }
+                }
+                current = next;
+            }
+
+            return current;
+        }
+
+        private static bool TryGetChordBoundaryIntersections(
+            IList<XYZ> polygon,
+            XYZ segA,
+            XYZ segB,
+            double tol,
+            out XYZ a,
+            out XYZ b)
+        {
+            a = null;
+            b = null;
+            if (polygon == null || polygon.Count < 3 || segA == null || segB == null)
+            {
+                return false;
+            }
+
+            var intersections = new List<XYZ>();
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                var p0 = polygon[i];
+                var p1 = polygon[(i + 1) % polygon.Count];
+                if (TryIntersectSegments2D(segA, segB, p0, p1, tol, out var ip))
+                {
+                    intersections.Add(ip);
+                }
+            }
+
+            intersections = intersections
+                .Distinct(new BeamLayoutGeometry2D.Xyz2DEqualityComparer(Math.Max(tol, 1e-5)))
+                .ToList();
+
+            if (intersections.Count < 2)
+            {
+                return false;
+            }
+
+            // Pick the two farthest-along points on the segment (handles vertex hits that produce >2 intersections).
+            double dx = segB.X - segA.X;
+            double dy = segB.Y - segA.Y;
+            double len2 = (dx * dx) + (dy * dy);
+            if (len2 <= 1e-18)
+            {
+                return false;
+            }
+
+            intersections.Sort((p, q) =>
+            {
+                double tp = ((p.X - segA.X) * dx) + ((p.Y - segA.Y) * dy);
+                double tq = ((q.X - segA.X) * dx) + ((q.Y - segA.Y) * dy);
+                return tp.CompareTo(tq);
+            });
+
+            a = BeamLayoutGeometry2D.ForcePointToZ(intersections[0], segA.Z);
+            b = BeamLayoutGeometry2D.ForcePointToZ(intersections[intersections.Count - 1], segA.Z);
+            return a.DistanceTo(b) > tol;
+        }
+
+        private static bool TryIntersectSegments2D(
+            XYZ a0,
+            XYZ a1,
+            XYZ b0,
+            XYZ b1,
+            double tol,
+            out XYZ intersection)
+        {
+            intersection = null;
+            if (a0 == null || a1 == null || b0 == null || b1 == null)
+            {
+                return false;
+            }
+
+            double rX = a1.X - a0.X;
+            double rY = a1.Y - a0.Y;
+            double sX = b1.X - b0.X;
+            double sY = b1.Y - b0.Y;
+
+            double denom = (rX * sY) - (rY * sX);
+            if (Math.Abs(denom) <= 1e-12)
+            {
+                return false;
+            }
+
+            double qpx = b0.X - a0.X;
+            double qpy = b0.Y - a0.Y;
+
+            double t = ((qpx * sY) - (qpy * sX)) / denom;
+            double u = ((qpx * rY) - (qpy * rX)) / denom;
+
+            if (t < -tol || t > 1.0 + tol || u < -tol || u > 1.0 + tol)
+            {
+                return false;
+            }
+
+            double x = a0.X + (t * rX);
+            double y = a0.Y + (t * rY);
+            intersection = new XYZ(x, y, a0.Z);
+            return true;
         }
 
         private static bool IsOpeningFullyInsideRegion(IList<XYZ> region, OpeningRect hole, double tol)
