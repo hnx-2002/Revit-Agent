@@ -141,5 +141,19 @@ namespace RevitAgent.Utils
             return element.Category != null &&
                    element.Category.Id.IntegerValue == (int)BuiltInCategory.OST_Floors;
         }
+
+        internal static bool IsCurveElement(Element element)
+        {
+            if (element is CurveElement ln)
+            {
+                var gs = (ln.LineStyle as GraphicsStyle);
+                int styleId = gs?.Id.IntegerValue ?? -1;
+
+                if (styleId == 7072197)
+                    return true;
+            }
+            return false;
+            
+        }
     }
 }

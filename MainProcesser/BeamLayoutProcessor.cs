@@ -96,7 +96,7 @@ namespace RevitAgent.MainProcesser
             result.ColumnCount = columnIds.Count;
             if (columnIds.Count < 3)
             {
-                result.ErrorMessage = "可用混凝土矩形柱不足 3 个（族名需以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内）。";
+                result.ErrorMessage = "可用混凝土矩形柱不足 3 个（族名需以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内，并且不等于柱底标高）。";
                 return result;
             }
 

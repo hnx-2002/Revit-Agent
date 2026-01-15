@@ -72,6 +72,12 @@ namespace RevitAgent.UI
                         continue;
                     }
 
+                    if (ElementClassifier.IsCurveElement(element))
+                    {
+                        _selectedElementIds.Add(element.Id);
+                        continue;
+                    }
+
                     if (!ElementClassifier.IsConcreteRectColumn(element))
                     {
                         continue;
@@ -82,7 +88,7 @@ namespace RevitAgent.UI
                         continue;
                     }
 
-                    if (viewZ < minZ - zTol || viewZ > maxZ + zTol)
+                    if (viewZ <= minZ + zTol || viewZ > maxZ + zTol)
                     {
                         continue;
                     }
@@ -117,7 +123,7 @@ namespace RevitAgent.UI
         {
             if (CountStructuralColumns() < 3)
             {
-                MessageBox.Show(this, "请至少选择 3 个混凝土矩形柱（族名以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "请至少选择 3 个混凝土矩形柱（族名以“结构_柱_矩形混凝土柱”开头，且当前平面视图高度需落在柱底/柱顶标高范围内，并且不等于柱底标高）。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -165,7 +171,8 @@ namespace RevitAgent.UI
             int total = _selectedElementIds.Count;
             int columns = CountStructuralColumns();
             int floors = CountFloors();
-            SelectedColumnsTextBlock.Text = $"已选择元素: {total}，柱: {columns}，楼板: {floors}";
+            int curves = CountCurves();
+            SelectedColumnsTextBlock.Text = $"已选择元素: {total}，柱: {columns}，楼板: {floors}，线: {curves}";
         }
 
         private int CountStructuralColumns()
@@ -189,6 +196,20 @@ namespace RevitAgent.UI
             {
                 var element = _doc.GetElement(id);
                 if (ElementClassifier.IsFloor(element))
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private int CountCurves()
+        {
+            int count = 0;
+            foreach (var id in _selectedElementIds)
+            {
+                var element = _doc.GetElement(id);
+                if (ElementClassifier.IsCurveElement(element))
                 {
                     count++;
                 }
