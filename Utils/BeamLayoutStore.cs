@@ -7,6 +7,8 @@ namespace RevitAgent.Utils
     {
         Main = 0,
         Secondary = 1,
+        OpeningSecondary = 2,
+        LoadSecondary = 3,
     }
 
     internal sealed class BeamPlacementInfo

@@ -42,6 +42,7 @@ namespace RevitAgent.MainProcesser
 
             var columnCandidateIds = new List<ElementId>();
             var floorIds = new List<ElementId>();
+            var guideCurves = new List<Curve>();
             foreach (var id in pickedIds)
             {
                 var element = doc.GetElement(id);
@@ -53,6 +54,22 @@ namespace RevitAgent.MainProcesser
                 if (ElementClassifier.IsFloor(element))
                 {
                     floorIds.Add(id);
+                }
+
+                if (ElementClassifier.IsCurveElement(element) && element is CurveElement ce)
+                {
+                    try
+                    {
+                        var c = ce.GeometryCurve;
+                        if (c != null)
+                        {
+                            guideCurves.Add(c);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
                 }
             }
 
@@ -150,26 +167,25 @@ namespace RevitAgent.MainProcesser
                 }
 
                 double spacing = MmToFeet(secondarySpacingMm);
-                foreach (var face in facesResult.Faces ?? new List<List<int>>())
+                var secondaryPlacements = SecondaryBeamPlacement.GeneratePlacementsFromFaceIndices(
+                    facesResult.Faces ?? new List<List<int>>(),
+                    points,
+                    z,
+                    spacing,
+                    guideCurves);
+
+                foreach (var p in secondaryPlacements)
                 {
-                    if (face == null || face.Count < 3)
+                    if (p?.Start == null || p.End == null)
                     {
                         continue;
                     }
 
-                    var polygon = face.Select(idx => points[idx]).ToList();
-                    foreach (var segment in SecondaryBeamLayout.GenerateSegments(polygon, z, spacing))
-                    {
-                        var curve = doc.Create.NewModelCurve(segment, sketchPlane);
-                        TagCurve(curve, "RevitAgent-SecondaryBeam");
-                        store.SecondaryBeamCurveIds.Add(curve.Id);
-                        store.BeamPlacements.Add(new BeamPlacementInfo
-                        {
-                            Role = BeamRole.Secondary,
-                            Start = segment.GetEndPoint(0),
-                            End = segment.GetEndPoint(1),
-                        });
-                    }
+                    var segment = Line.CreateBound(p.Start, p.End);
+                    var curve = doc.Create.NewModelCurve(segment, sketchPlane);
+                    TagCurve(curve, GetBeamTag(p.Role));
+                    store.SecondaryBeamCurveIds.Add(curve.Id);
+                    store.BeamPlacements.Add(p);
                 }
 
                 beamPlacementResult = PlaceRealBeams(doc, targetPlan, store.BeamPlacements, store.PlacedBeamInstanceIds);
@@ -197,7 +213,7 @@ namespace RevitAgent.MainProcesser
 
                 result.FaceCount = facesResult.FacesCount;
                 result.MainBeamCount = store.BeamPlacements.Count(x => x.Role == BeamRole.Main);
-                result.SecondaryBeamCount = store.BeamPlacements.Count(x => x.Role == BeamRole.Secondary);
+                result.SecondaryBeamCount = store.BeamPlacements.Count(x => x.Role != BeamRole.Main);
                 result.PlacedBeamCount = store.PlacedBeamInstanceIds.Count;
                 result.MissingBeamTypeCount = beamPlacementResult.MissingTypeNames.Count;
                 result.MissingBeamTypeNamesPreview = beamPlacementResult.MissingTypeNamesPreview;
@@ -299,7 +315,7 @@ namespace RevitAgent.MainProcesser
                     }
 
                     var beam = doc.Create.NewFamilyInstance(line, symbol, level, StructuralType.Beam);
-                    TagElement(beam, placement.Role == BeamRole.Main ? "RevitAgent-MainBeam" : "RevitAgent-SecondaryBeam");
+                    TagElement(beam, GetBeamTag(placement.Role));
 
                     double offset = placement.Start.Z - level.ProjectElevation;
                     TrySetInstanceOffsetParams(beam, offset);
@@ -539,6 +555,17 @@ namespace RevitAgent.MainProcesser
                 }
             }
             return points;
+        }
+
+        private static string GetBeamTag(BeamRole role)
+        {
+            return role switch
+            {
+                BeamRole.Main => "RevitAgent-MainBeam",
+                BeamRole.OpeningSecondary => "RevitAgent-OpeningSecondaryBeam",
+                BeamRole.LoadSecondary => "RevitAgent-LoadSecondaryBeam",
+                _ => "RevitAgent-SecondaryBeam",
+            };
         }
     }
 }
