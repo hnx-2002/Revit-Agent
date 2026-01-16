@@ -147,9 +147,9 @@ namespace RevitAgent.Utils
             if (element is CurveElement ln)
             {
                 var gs = (ln.LineStyle as GraphicsStyle);
-                int styleId = gs?.Id.IntegerValue ?? -1;
+                var name = gs.Name;
 
-                if (styleId == 15947562)
+                if (name == "洞口边线")
                     return true;
             }
             return false;
