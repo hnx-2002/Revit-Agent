@@ -1,0 +1,18 @@
+<Window x:Class="AILayoutAgent.UI.AItestMainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AItest Layout Agent"
+        Height="190"
+        Width="360"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Topmost="True"
+        ShowActivated="False"
+        ShowInTaskbar="False">
+    <StackPanel Margin="12">
+        <TextBlock Text="点击下面按钮后，请回到 Revit 视图中框选构件/线。框选完成后会按当前平面名称解析的标高进行筛选。"
+                   TextWrapping="Wrap" />
+        <Button Margin="0,12,0,0" Height="34" Content="框选并筛选（柱/楼板/洞口线/荷载线）" Click="SelectButton_Click" />
+        <TextBlock x:Name="StatusText" Margin="0,12,0,0" TextWrapping="Wrap" />
+    </StackPanel>
+</Window>

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <RootNamespace>AILayoutAgent</RootNamespace>
+    <AssemblyName>AILayoutAgent</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath Condition="Exists('C:\\Program Files\\Autodesk\\Revit 2018\\RevitAPI.dll')">C:\Program Files\Autodesk\Revit 2018\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath Condition="Exists('C:\\Program Files\\Autodesk\\Revit 2018\\RevitAPIUI.dll')">C:\Program Files\Autodesk\Revit 2018\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <Target Name="EnsureRestoreBeforeBuild" BeforeTargets="ResolvePackageAssets">
+    <Exec Command="dotnet restore &quot;$(MSBuildProjectFullPath)&quot;" Condition="!Exists('$(ProjectAssetsFile)')" />
+  </Target>
+
+  <!-- 可选：编译后复制到 Revit 2018 Addins 目录（按需启用）
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="if not exist &quot;C:\ProgramData\Autodesk\Revit\Addins\2018&quot; mkdir &quot;C:\ProgramData\Autodesk\Revit\Addins\2018&quot;&#xD;&#xA;copy &quot;$(ProjectDir)AILayoutAgent.addin&quot; &quot;C:\ProgramData\Autodesk\Revit\Addins\2018\AILayoutAgent.addin&quot; /Y&#xD;&#xA;copy &quot;$(TargetDir)AILayoutAgent.dll&quot; &quot;C:\ProgramData\Autodesk\Revit\Addins\2018\AILayoutAgent.dll&quot; /Y" />
+  </Target>
+  -->
+</Project>

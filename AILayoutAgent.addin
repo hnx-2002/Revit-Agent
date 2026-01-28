@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>AILayoutAgent</Name>
+    <Assembly>C:\ProgramData\Autodesk\Revit\Addins\2018\AILayoutAgent.dll</Assembly>
+    <AddInId>1B9BB54E-1E4E-4B8A-9F58-1E65D5A6E14C</AddInId>
+    <FullClassName>AILayoutAgent.Application</FullClassName>
+    <VendorId>ADSK</VendorId>
+    <VendorDescription>Autodesk, www.autodesk.com</VendorDescription>
+  </AddIn>
+</RevitAddIns>
