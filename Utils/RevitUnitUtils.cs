@@ -9,10 +9,14 @@ namespace AILayoutAgent.Utils
             return UnitUtils.ConvertFromInternalUnits(feet, DisplayUnitType.DUT_MILLIMETERS);
         }
 
+        internal static double MillimetersToFeet(double millimeters)
+        {
+            return UnitUtils.ConvertToInternalUnits(millimeters, DisplayUnitType.DUT_MILLIMETERS);
+        }
+
         internal static double FeetToMeters(double feet)
         {
             return UnitUtils.ConvertFromInternalUnits(feet, DisplayUnitType.DUT_METERS);
         }
     }
 }
-

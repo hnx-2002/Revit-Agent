@@ -38,9 +38,9 @@ namespace AILayoutAgent.Utils
             {
                 // var dllDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
                 
-                var dllDir = @"C:\Users\Administrator\Desktop\AILayoutAgent\";
+                var configpath = @"C:\Users\Administrator\Desktop\AILayoutAgent\Config\";
                 
-                var path = Path.Combine(dllDir, "dify.settings.json");
+                var path = Path.Combine(configpath, "dify.settings.json");
                 if (File.Exists(path))
                 {
                     var json = File.ReadAllText(path, Encoding.UTF8);
